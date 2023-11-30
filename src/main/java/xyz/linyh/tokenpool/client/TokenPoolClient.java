@@ -3,9 +3,11 @@ package xyz.linyh.tokenpool.client;
 
 import lombok.extern.slf4j.Slf4j;
 import xyz.linyh.tokenpool.entity.GptTask;
+import xyz.linyh.tokenpool.entity.GptTasker;
+import xyz.linyh.tokenpool.entity.TaskResult;
+import xyz.linyh.tokenpool.entity.TokenEntity;
 
 import java.util.List;
-import java.util.Queue;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -30,13 +32,16 @@ public class TokenPoolClient extends Thread {
      */
     private Integer frequency;
 
-    private BlockingQueue<GptTask> taskQueue = new LinkedBlockingQueue<>();
+    private BlockingQueue<GptTasker> taskQueue = new LinkedBlockingQueue<>();
 
-
+    /**
+     * 用来获取结果的线程池
+     */
+    private ExecutorService resultPool;
 
     private BlockingQueue<Runnable> blockingQueue = new LinkedBlockingQueue<>();
 
-    private BlockingQueue<String> tokenQueue = new LinkedBlockingQueue<>();
+    private BlockingQueue<TokenEntity> tokenQueue = new LinkedBlockingQueue<>();
 
     /**
      * 定时任务执行器
@@ -48,14 +53,15 @@ public class TokenPoolClient extends Thread {
     Boolean active = true;
 
     public TokenPoolClient() {
-
-        refreshTokenQueue();
+//        refreshTokenQueue();
         this.start();
-
     }
 
     public TokenPoolClient(int maxPoolSize, List<String> tokens, Integer cycle, Integer frequency) {
-
+        for(int i = 0;i<tokens.size();i++){
+            TokenEntity tokenEntity = new TokenEntity(tokens.get(i),  0, cycle, frequency,0);
+            tokenQueue.add(tokenEntity);
+        }
         this.executorService = new ThreadPoolExecutor(maxPoolSize,
                 maxPoolSize,
                 5,
@@ -63,21 +69,32 @@ public class TokenPoolClient extends Thread {
                 blockingQueue,
                 new ThreadPoolExecutor.AbortPolicy());
 
-
+        this.resultPool = new ThreadPoolExecutor(maxPoolSize,
+                maxPoolSize,
+                5,
+                TimeUnit.SECONDS,
+                blockingQueue,
+                new ThreadPoolExecutor.AbortPolicy());
 
         this.cycle = cycle;
         this.frequency = frequency;
         this.tokens = tokens;
-        refreshTokenQueue();
+//        refreshTokenQueue();
         this.start();
 
 //        初始化token队列
     }
 
     public TokenPoolClient(List<String> tokens, Integer cycle, Integer frequency) {
+
         int maxPoolSize = tokens.size();
         if (tokens.size() >= 10) {
             maxPoolSize = 10;
+        }
+
+        for(int i = 0;i<tokens.size();i++){
+            TokenEntity tokenEntity = new TokenEntity(tokens.get(i),  0, cycle, frequency,0);
+            tokenQueue.add(tokenEntity);
         }
 
         this.executorService = new ThreadPoolExecutor(maxPoolSize,
@@ -87,49 +104,58 @@ public class TokenPoolClient extends Thread {
                 blockingQueue,
                 new ThreadPoolExecutor.AbortPolicy());
 
+        this.resultPool = new ThreadPoolExecutor(maxPoolSize,
+                maxPoolSize,
+                5,
+                TimeUnit.SECONDS,
+                blockingQueue,
+                new ThreadPoolExecutor.AbortPolicy());
+
         this.cycle = cycle;
         this.frequency = frequency;
         this.tokens = tokens;
-        refreshTokenQueue();
         this.start();
     }
 
-    private void refreshTokenQueue() {
-        for (int i = 0; i < frequency; i++) {
-            tokenQueue.addAll(this.tokens);
-        }
-    }
 
 
-    public void addTask(GptTask task) throws Exception {
-//        添加到要执行的队列中
-        taskQueue.add(task);
+//    TODO 如果token异常日志
+    public <T>T addTask(GptTask<T> task) throws Exception {
+//        加强task
+
+        GptTasker<T> gptTasker = new GptTasker<>(task);
+
+        taskQueue.add(gptTasker);
+        return gptTasker.getResult();
     }
 
     @Override
     public void run() {
 
-//        设置一个定时刷新的任务去刷新token池
-        scheduler.scheduleAtFixedRate(() -> {
-            tokenQueue.clear();
-            refreshTokenQueue();
-        }, 0, cycle, TimeUnit.MINUTES);
 
         while (active) {
             try {
-//                需要上锁，不然可能会出现重复拿的情况
-                String token = tokenQueue.take();
-                log.info("当前token值为:{}", token);
-                GptTask task = taskQueue.take();
 
-                log.info("当前token值2为:{}", token);
+                TokenEntity tokenEntity = tokenQueue.take();
+                if (tokenEntity.getThisToken()==null) {
+//                    如果拿不到，就重新放到队列里面
+                    tokenQueue.add(tokenEntity);
+                    continue;
+                }
+                log.info("当前token值为:{}", tokenEntity.getToken());
+                GptTasker task = taskQueue.take();
+
+                log.info("当前token值2为:{}", tokenEntity.getToken());
 //                利用线程池去执行对应的任务
                 executorService.execute(() -> {
 
                     try {
-                        task.execute(token);
+                        task.executeTask(tokenEntity.getToken());
+                        log.info("添加回token队列{}", tokenEntity);
+                        tokenQueue.add(tokenEntity);
                     } catch (Exception e) {
-//                        log.info("捕获抛出的异常:{},对应的token值为{}",e.getMessage(),token);
+                        log.info("出现异常");
+                        tokenQueue.add(tokenEntity);
                     }
                 });
 
@@ -140,7 +166,6 @@ public class TokenPoolClient extends Thread {
         }
 
     }
-
     /**
      * 关闭这个定时任务就是把tokenPoolClient这个程序给关闭
      */
