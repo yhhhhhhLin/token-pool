@@ -3,6 +3,7 @@ package xyz.linyh.tokenpool.entity;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -10,6 +11,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
+@Slf4j
 public class GptTasker<T>{
 
 
@@ -32,8 +34,14 @@ public class GptTasker<T>{
 
     public void executeTask(String token) {
 
-        T result = task.execute(token);
+        T result = null;
+        try {
+            result = task.execute(token);
+        } catch (Exception e) {
+            log.error("执行任务失败", e);
+        }
         resultBlockingQueue.add(result);
-//        resultBlockingQueue.add(new TaskResult("200", "success"));
     }
+
+
 }

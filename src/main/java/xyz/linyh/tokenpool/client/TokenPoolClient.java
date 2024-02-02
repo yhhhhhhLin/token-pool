@@ -4,7 +4,6 @@ package xyz.linyh.tokenpool.client;
 import lombok.extern.slf4j.Slf4j;
 import xyz.linyh.tokenpool.entity.GptTask;
 import xyz.linyh.tokenpool.entity.GptTasker;
-import xyz.linyh.tokenpool.entity.TaskResult;
 import xyz.linyh.tokenpool.entity.TokenEntity;
 
 import java.util.List;
@@ -58,8 +57,8 @@ public class TokenPoolClient extends Thread {
     }
 
     public TokenPoolClient(int maxPoolSize, List<String> tokens, Integer cycle, Integer frequency) {
-        for(int i = 0;i<tokens.size();i++){
-            TokenEntity tokenEntity = new TokenEntity(tokens.get(i),  0, cycle, frequency,0);
+        for (int i = 0; i < tokens.size(); i++) {
+            TokenEntity tokenEntity = new TokenEntity(tokens.get(i), 0, cycle, frequency, 0);
             tokenQueue.add(tokenEntity);
         }
         this.executorService = new ThreadPoolExecutor(maxPoolSize,
@@ -92,8 +91,8 @@ public class TokenPoolClient extends Thread {
             maxPoolSize = 10;
         }
 
-        for(int i = 0;i<tokens.size();i++){
-            TokenEntity tokenEntity = new TokenEntity(tokens.get(i),  0, cycle, frequency,0);
+        for (int i = 0; i < tokens.size(); i++) {
+            TokenEntity tokenEntity = new TokenEntity(tokens.get(i), 0, cycle, frequency, 0);
             tokenQueue.add(tokenEntity);
         }
 
@@ -118,9 +117,8 @@ public class TokenPoolClient extends Thread {
     }
 
 
-
-//    TODO 如果token异常日志
-    public <T>T addTask(GptTask<T> task) throws Exception {
+    //    TODO 如果token异常日志
+    public <T> T addTask(GptTask<T> task) throws Exception {
 //        加强task
 
         GptTasker<T> gptTasker = new GptTasker<>(task);
@@ -132,21 +130,18 @@ public class TokenPoolClient extends Thread {
     @Override
     public void run() {
 
-
         while (active) {
             try {
 
                 TokenEntity tokenEntity = tokenQueue.take();
-                if (tokenEntity.getThisToken()==null) {
-//                    如果拿不到，就重新放到队列里面
+                if (tokenEntity.getThisToken() == null) {
                     tokenQueue.add(tokenEntity);
                     continue;
                 }
-                log.info("当前token值为:{}", tokenEntity.getToken());
+                log.info("获取到token值，当前token值为:{}", tokenEntity.getToken());
                 GptTasker task = taskQueue.take();
+                log.info("获取到task，当前的task值为:{}", task);
 
-                log.info("当前token值2为:{}", tokenEntity.getToken());
-//                利用线程池去执行对应的任务
                 executorService.execute(() -> {
 
                     try {
@@ -166,6 +161,7 @@ public class TokenPoolClient extends Thread {
         }
 
     }
+
     /**
      * 关闭这个定时任务就是把tokenPoolClient这个程序给关闭
      */
